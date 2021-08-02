@@ -1,4 +1,7 @@
+const ApplicationError = require('../common/application-error');
 const Models = require('../models/models');
+const axios = require('axios').default;
+const config = require('../config');
 
 const getGroupChatMessageHistory = async (groupChatId) => {
   let messageHistory = await Models.GroupChatMessageHistory.findOne({ groupChatId: groupChatId }).exec();
@@ -20,6 +23,20 @@ const getGroupChatMessageHistory = async (groupChatId) => {
   return messageHistory;
 };
 
+const getUsername = async (groupId, userId) => {
+  try {
+    let response = await axios.get(`https://api.line.me/v2/bot/group/${groupId}/member/${userId}`, {
+      headers: {
+        'Authorization': `Bearer ${config.channelAccessToken}`
+      }
+    });
+  
+    return response.data.displayName;
+  } catch(error) {
+    throw new ApplicationError('Error fetching username.');
+  }
+}
+
 const sortByTimestamp = (first, second) => {
   if (first.timestamp < second.timestamp) {
     return -1;
@@ -31,20 +48,26 @@ const sortByTimestamp = (first, second) => {
 }
 
 module.exports.dumpUnunsend = async (groupChatId, amount) => {
-  let messageHistory = getGroupChatMessageHistory(groupChatId);
+  let messageHistory = await getGroupChatMessageHistory(groupChatId);
   let unsentMessages = messageHistory.unsentMessages;
   
   if (amount > 0 && amount < unsentMessages.length) {
     unsentMessages = unsentMessages.slice(-amount);
+  }
+
+  // Get username.
+  for (let index = 0; index < unsentMessages.length; index++) {
+    let message = unsentMessages[index];
+    message.username = await getUsername(groupChatId, message.userId);    
   }
   
   return unsentMessages;
 };
 
 module.exports.pushUnunsend = async (groupChatId, messageId) => {
-  let messageHistory = getGroupChatMessageHistory(groupChatId);
+  let messageHistory = await getGroupChatMessageHistory(groupChatId);
   
-  let unsentMessage = messageHistory.unsentMessages.find(message => message.id === messageId);
+  let unsentMessage = messageHistory.messages.find(message => message.id === messageId);
   if (unsentMessage === null || unsentMessage === undefined) {
     throw new ApplicationError(`Cannot find a message with the id ${messageId}.`);
   }
@@ -62,7 +85,7 @@ module.exports.pushUnunsend = async (groupChatId, messageId) => {
 };
 
 module.exports.popUnunsend = async (groupChatId, amount) => {
-  let messageHistory = getGroupChatMessageHistory(groupChatId);
+  let messageHistory = await getGroupChatMessageHistory(groupChatId);
   let unsentMessages = messageHistory.unsentMessages;
   
   while (amount > 0) {
@@ -74,7 +97,7 @@ module.exports.popUnunsend = async (groupChatId, amount) => {
 };
 
 module.exports.logMessage = async (timestamp, source, message) => {
-  let messageHistory = getGroupChatMessageHistory(source.groupId);
+  let messageHistory = await getGroupChatMessageHistory(source.groupId);
   
   messageHistory.messages.push({
     id: message.id,
